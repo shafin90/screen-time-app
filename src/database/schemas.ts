@@ -13,12 +13,12 @@ export class Usage extends Realm.Object<Usage> {
     name: "Usage",
     primaryKey: "id",
     properties: {
-      id:          "string",
+      id: "string",
       packageName: "string",
-      appName:     "string",
-      timeInMs:    "int",
-      openCount:   "int",
-      date:        "string",
+      appName: "string",
+      timeInMs: "int",
+      openCount: "int",
+      date: "string",
     },
   };
 }
@@ -33,8 +33,8 @@ export class DailySnapshot extends Realm.Object<DailySnapshot> {
     name: "DailySnapshot",
     primaryKey: "date",
     properties: {
-      date:      "string",
-      totalMs:   "int",
+      date: "string",
+      totalMs: "int",
       updatedAt: "int",
     },
   };

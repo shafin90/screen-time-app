@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -6,56 +6,49 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { BarChart } from "react-native-chart-kit";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { getUsageStats, hasUsageStatsPermission, UsageStat } from "@/src/native/usageStats";
-import { openUsageSettings } from "@/src/utils/openUsagePermission";
-import { formatUsageTime } from "@/src/utils/formatUsage";
 import {
-  saveUsageToRealm,
-  getWeeklyTotals,
   DailyTotal,
+  getWeeklyTotals,
+  saveUsageToRealm,
 } from "@/src/services/usageService";
+import { formatUsageTime } from "@/src/utils/formatUsage";
+import { openUsageSettings } from "@/src/utils/openUsagePermission";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
 const C = {
-  bg:         "#0D0F14",
-  card:       "#161A23",
-  cardBorder: "#1E2433",
-  accent:     "#6C63FF",
-  accentSoft: "#6C63FF22",
-  text:       "#E8EAF0",
-  subtext:    "#7A7F94",
-  pill:       "#1E2433",
-  success:    "#4ADE80",
-  danger:     "#FF5C5C",
+  bg: "#F8FAFC", // Light slate background
+  card: "#FFFFFF", // Pure white cards
+  cardBorder: "#E2E8F0", // Soft slate border
+  accent: "#4361EE", // Modern Academic Blue
+  accentSoft: "#4361EE15",
+  text: "#1E293B", // Dark slate text
+  subtext: "#64748B", // Medium slate subtext
+  pill: "#F1F5F9", // Lightest slate for backgrounds
+  success: "#06D6A0",
+  danger: "#EF476F",
 };
-
-const ICON_COLORS = [
-  "#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF",
-  "#C77DFF", "#FF9B54", "#06D6A0", "#EF476F",
-];
-const iconColor = (name: string) =>
-  ICON_COLORS[name.charCodeAt(0) % ICON_COLORS.length];
-const initials = (name: string) => name.slice(0, 2).toUpperCase();
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ScreenTimeHome() {
-  const [loading,       setLoading]       = useState(true);
-  const [refreshing,    setRefreshing]    = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [stats,         setStats]         = useState<UsageStat[]>([]);
-  const [weekly,        setWeekly]        = useState<DailyTotal[]>([]);
-  const [savedAt,       setSavedAt]       = useState<Date | null>(null);
-  const [saveError,     setSaveError]     = useState(false);
+  const [stats, setStats] = useState<UsageStat[]>([]);
+  const [weekly, setWeekly] = useState<DailyTotal[]>([]);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [saveError, setSaveError] = useState(false);
+  const [sortBy, setSortBy] = useState<'time' | 'opens'>('time');
 
   // Pulsing animation for permission wall button
   const pulse = useRef(new Animated.Value(1)).current;
@@ -64,29 +57,26 @@ export default function ScreenTimeHome() {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulse, { toValue: 1.06, duration: 800, useNativeDriver: true }),
-          Animated.timing(pulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
+          Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true }),
         ])
       ).start();
     }
-  }, [hasPermission]);
+  }, [hasPermission, pulse]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
   const load = useCallback(async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
     try {
-      // 1. Check permission
       const granted = await hasUsageStatsPermission();
       setHasPermission(granted);
       if (!granted) return;
 
-      // 2. Fetch live stats from native module
       const raw = await getUsageStats();
       const sorted = [...raw]
         .sort((a, b) => b.totalTimeInForeground - a.totalTimeInForeground)
         .slice(0, 40);
       setStats(sorted);
 
-      // 3. Persist to Realm (offline, no network needed)
       try {
         await saveUsageToRealm(sorted);
         setSavedAt(new Date());
@@ -96,7 +86,6 @@ export default function ScreenTimeHome() {
         setSaveError(true);
       }
 
-      // 4. Load 7-day history from Realm for the chart
       try {
         const w = await getWeeklyTotals();
         setWeekly(w);
@@ -104,7 +93,7 @@ export default function ScreenTimeHome() {
         console.warn("Realm weekly query error:", e);
       }
     } catch (e) {
-      console.error("Load error:", e);
+      console.warn("Usage load error:", e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -122,10 +111,24 @@ export default function ScreenTimeHome() {
   const todayTotalMs = stats.reduce((s, u) => s + u.totalTimeInForeground, 0);
   const todayTotalLabel = formatUsageTime(todayTotalMs);
 
+  const sortedStats = useMemo(() => {
+    return [...stats].sort((a, b) => {
+      if (sortBy === 'time') {
+        return b.totalTimeInForeground - a.totalTimeInForeground;
+      }
+      return b.openCount - a.openCount;
+    });
+  }, [stats, sortBy]);
+
+  const maxForegroundMs = useMemo(() => {
+    if (stats.length === 0) return 1;
+    return Math.max(...stats.map(s => s.totalTimeInForeground), 1);
+  }, [stats]);
+
   const chartLabels = weekly.length >= 2
     ? weekly.map((d) =>
-        new Date(d.date + "T00:00:00").toLocaleDateString("en", { weekday: "short" })
-      )
+      new Date(d.date + "T00:00:00").toLocaleDateString("en", { weekday: "short" })
+    )
     : ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   const chartData = {
@@ -137,16 +140,14 @@ export default function ScreenTimeHome() {
     }],
   };
 
-  // ── Insights ──────────────────────────────────────────────────────────────
-  const mostUsed   = stats[0];
+  const mostUsed = stats[0];
   const mostOpened = [...stats].sort((a, b) => b.openCount - a.openCount)[0];
 
-  // ── Permission wall ─────────────────────────────────────────────────────────
+  // ── Render Branches ─────────────────────────────────────────────────────────
   if (hasPermission === false) {
     return <PermissionWall pulse={pulse} onGrant={openUsageSettings} onCheck={() => load()} />;
   }
 
-  // ── Loading state ───────────────────────────────────────────────────────────
   if (loading) {
     return (
       <SafeAreaView style={s.centered}>
@@ -156,11 +157,10 @@ export default function ScreenTimeHome() {
     );
   }
 
-  // ── Main UI ─────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={s.root}>
       <FlatList
-        data={stats}
+        data={sortedStats}
         keyExtractor={(item) => item.packageName}
         refreshControl={
           <RefreshControl
@@ -171,7 +171,6 @@ export default function ScreenTimeHome() {
         }
         ListHeaderComponent={
           <>
-            {/* ── Header ── */}
             <View style={s.headerRow}>
               <View>
                 <Text style={s.headerTitle}>Today</Text>
@@ -187,7 +186,6 @@ export default function ScreenTimeHome() {
               </View>
             </View>
 
-            {/* ── Offline badge ── */}
             <View style={s.offlineBadgeRow}>
               <View style={s.offlineBadge}>
                 <Text style={s.offlineDot}>●</Text>
@@ -195,30 +193,29 @@ export default function ScreenTimeHome() {
               </View>
             </View>
 
-            {/* ── Weekly chart ── */}
             <View style={s.section}>
               <SectionTitle title="Weekly Overview" />
               <View style={s.chartCard}>
                 <BarChart
                   data={chartData}
-                  width={SCREEN_WIDTH - 48}
+                  width={SCREEN_WIDTH - 70}
                   height={160}
                   yAxisSuffix="h"
                   yAxisLabel=""
-                  showValuesOnTopOfBars
                   fromZero
                   withInnerLines={false}
                   chartConfig={{
-                    backgroundColor:        C.card,
-                    backgroundGradientFrom: C.card,
-                    backgroundGradientTo:   C.card,
-                    decimalPlaces:          1,
-                    color:    (opacity = 1) => `rgba(108, 99, 255, ${opacity})`,
-                    labelColor: ()          => C.subtext,
-                    propsForBackgroundLines: { stroke: "transparent" },
-                    propsForLabels: { fontSize: 10 },
+                    backgroundColor: "#FFFFFF",
+                    backgroundGradientFrom: "#FFFFFF",
+                    backgroundGradientTo: "#FFFFFF",
+                    decimalPlaces: 1,
+                    color: (opacity) => "rgba(67, 97, 238, " + (opacity || 1) + ")",
+                    labelColor: () => C.subtext,
+                    propsForBackgroundLines: { stroke: "#F1F5F9" },
+                    propsForLabels: { fontSize: 10, fontWeight: "600" },
                   }}
-                  style={{ borderRadius: 16 }}
+                  flatColor={true}
+                  style={{ borderRadius: 8 }}
                 />
               </View>
               {weekly.length < 2 && (
@@ -228,7 +225,6 @@ export default function ScreenTimeHome() {
               )}
             </View>
 
-            {/* ── Daily Insights ── */}
             <View style={s.section}>
               <SectionTitle title="Daily Insights" />
               <View style={s.insightGrid}>
@@ -247,12 +243,28 @@ export default function ScreenTimeHome() {
               </View>
             </View>
 
-            {/* ── App list heading ── */}
-            <View style={s.section}>
-              <SectionTitle
-                title="App Usage"
-                subtitle={`${stats.length} apps · top 40`}
-              />
+            <View style={[s.section, { marginBottom: 12 }]}>
+              <View style={s.sectionTitleRow}>
+                <View>
+                  <Text style={s.sectionTitle}>App Usage</Text>
+                  <Text style={s.sectionSubtitle}>{stats.length} apps · top 40</Text>
+                </View>
+                
+                <View style={s.sortBar}>
+                   <Pressable 
+                     onPress={() => setSortBy('time')}
+                     style={[s.sortBtn, sortBy === 'time' && s.sortBtnActive]}
+                   >
+                     <Text style={[s.sortBtnText, sortBy === 'time' && s.sortBtnTextActive]}>Time</Text>
+                   </Pressable>
+                   <Pressable 
+                     onPress={() => setSortBy('opens')}
+                     style={[s.sortBtn, sortBy === 'opens' && s.sortBtnActive, { marginLeft: 8 }]}
+                   >
+                     <Text style={[s.sortBtnText, sortBy === 'opens' && s.sortBtnTextActive]}>Clicks</Text>
+                   </Pressable>
+                </View>
+              </View>
             </View>
           </>
         }
@@ -260,7 +272,7 @@ export default function ScreenTimeHome() {
           <AppRow
             stat={item}
             rank={index + 1}
-            maxMs={stats[0]?.totalTimeInForeground ?? 1}
+            maxMs={maxForegroundMs}
           />
         )}
         ListFooterComponent={
@@ -299,14 +311,13 @@ function AppRow({
   stat, rank, maxMs,
 }: { stat: UsageStat; rank: number; maxMs: number }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const pct   = Math.max(0, Math.min(1, stat.totalTimeInForeground / maxMs));
-  const color = iconColor(stat.appName);
-  const time  = formatUsageTime(stat.totalTimeInForeground);
+  const pct = Math.max(0, Math.min(1, stat.totalTimeInForeground / maxMs));
+  const time = formatUsageTime(stat.totalTimeInForeground);
 
   const onPress = () => {
     Animated.sequence([
       Animated.timing(scaleAnim, { toValue: 0.96, duration: 70, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1,    duration: 70, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 1, duration: 70, useNativeDriver: true }),
     ]).start();
   };
 
@@ -314,29 +325,21 @@ function AppRow({
     <Pressable onPress={onPress}>
       <Animated.View style={[s.appRow, { transform: [{ scale: scaleAnim }] }]}>
         <Text style={s.rankText}>{rank}</Text>
-
-        {/* App icon avatar */}
-        <View style={[s.appIcon, { backgroundColor: color + "33" }]}>
-          <Text style={[s.appIconText, { color }]}>{initials(stat.appName)}</Text>
-        </View>
-
-        {/* Name + progress bar */}
         <View style={s.appInfo}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={s.appName} numberOfLines={1}>{stat.appName}</Text>
             {stat.openCount > 0 && (
-               <View style={[s.openBadge, { backgroundColor: color + "1a" }]}>
-                 <Text style={[s.openBadgeText, { color }]}>{stat.openCount}x</Text>
-               </View>
+              <View style={[s.openBadge, { backgroundColor: C.accentSoft }]}>
+                <Text style={[s.openBadgeText, { color: C.accent }]}>{stat.openCount}x</Text>
+              </View>
             )}
           </View>
           <Text style={s.appPkg} numberOfLines={1}>{stat.packageName}</Text>
           <View style={s.barTrack}>
-            <View style={[s.barFill, { width: `${pct * 100}%`, backgroundColor: color }]} />
+            <View style={[s.barFill, { width: (pct * 100) + "%", backgroundColor: C.accent }]} />
           </View>
         </View>
-
-        <Text style={[s.timeText, { color }]}>{time}</Text>
+        <Text style={[s.timeText, { color: C.text }]}>{time}</Text>
       </Animated.View>
     </Pressable>
   );
@@ -345,12 +348,12 @@ function AppRow({
 function InsightCard({ label, value, subValue, icon }: { label: string; value: string; subValue: string; icon: string }) {
   return (
     <View style={s.insightCard}>
-       <Text style={s.insightIcon}>{icon}</Text>
-       <View>
-         <Text style={s.insightLabel}>{label}</Text>
-         <Text style={s.insightValue} numberOfLines={1}>{value}</Text>
-         <Text style={s.insightSubValue}>{subValue}</Text>
-       </View>
+      <Text style={s.insightIcon}>{icon}</Text>
+      <View>
+        <Text style={s.insightLabel}>{label}</Text>
+        <Text style={s.insightValue} numberOfLines={1}>{value}</Text>
+        <Text style={s.insightSubValue}>{subValue}</Text>
+      </View>
     </View>
   );
 }
@@ -387,114 +390,125 @@ function PermissionWall({
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: C.bg },
+  root: { flex: 1, backgroundColor: C.bg },
   listContent: { paddingBottom: 48 },
-  centered:    {
+  centered: {
     flex: 1, backgroundColor: C.bg,
     justifyContent: "center", alignItems: "center", paddingHorizontal: 32,
   },
   subtext: { fontSize: 12, color: C.subtext },
-
-  // Header
   headerRow: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    paddingHorizontal: 24, paddingTop: 24, paddingBottom: 4,
+    paddingHorizontal: 24, paddingTop: 32, paddingBottom: 12,
   },
-  headerTitle: { fontSize: 30, fontWeight: "800", color: C.text },
-  headerDate:  { fontSize: 13, color: C.subtext, marginTop: 2 },
-  totalBadge:  {
-    backgroundColor: C.accentSoft, paddingHorizontal: 16, paddingVertical: 10,
-    borderRadius: 20, borderWidth: 1, borderColor: C.accent + "55",
+  headerTitle: { fontSize: 32, fontWeight: "800", color: C.text, letterSpacing: -0.5 },
+  headerDate: { fontSize: 14, color: C.subtext, marginTop: 2, fontWeight: "500" },
+  totalBadge: {
+    backgroundColor: C.accent, paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 20, shadowColor: C.accent, shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 6,
     alignItems: "center",
   },
-  totalBadgeValue: { fontSize: 18, fontWeight: "800", color: C.accent },
-  totalBadgeLabel: { fontSize: 10, color: C.accent + "aa", marginTop: 1 },
-
-  // Offline badge
-  offlineBadgeRow: { paddingHorizontal: 24, marginTop: 8 },
+  totalBadgeValue: { fontSize: 18, fontWeight: "800", color: "#FFFFFF" },
+  totalBadgeLabel: { fontSize: 10, color: "rgba(255,255,255,0.7)", marginTop: 1, textTransform: "uppercase" },
+  offlineBadgeRow: { paddingHorizontal: 24, marginTop: 0 },
   offlineBadge: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "#4ADE8022", borderRadius: 20, paddingHorizontal: 12,
-    paddingVertical: 5, alignSelf: "flex-start",
-    borderWidth: 1, borderColor: "#4ADE8044",
+    backgroundColor: "#F1F5F9", borderRadius: 20, paddingHorizontal: 12,
+    paddingVertical: 6, alignSelf: "flex-start",
+    borderWidth: 1, borderColor: "#E2E8F0",
   },
-  offlineDot:       { fontSize: 8, color: "#4ADE80" },
-  offlineBadgeText: { fontSize: 11, color: "#4ADE80", fontWeight: "600" },
-
-  // Sections
-  section:       { paddingHorizontal: 24, marginTop: 20 },
+  offlineDot: { fontSize: 8, color: C.success },
+  offlineBadgeText: { fontSize: 11, color: C.subtext, fontWeight: "600" },
+  section: { paddingHorizontal: 24, marginTop: 28 },
   sectionTitleRow: {
     flexDirection: "row", justifyContent: "space-between",
-    alignItems: "baseline", marginBottom: 10,
+    alignItems: "baseline", marginBottom: 16,
   },
-  sectionTitle: { fontSize: 16, fontWeight: "700", color: C.text },
-
-  // Chart
+  sectionTitle: { fontSize: 18, fontWeight: "800", color: C.text, letterSpacing: -0.3 },
+  sectionSubtitle: { fontSize: 12, color: C.subtext, marginTop: 2 },
   chartCard: {
-    backgroundColor: C.card, borderRadius: 20,
-    borderWidth: 1, borderColor: C.cardBorder,
-    overflow: "hidden", paddingTop: 12,
+    backgroundColor: "#FFFFFF", borderRadius: 10,
+    paddingVertical: 25,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 15, elevation: 3,
+    borderWidth: 1, borderColor: "#F1F5F9",
   },
-
-  // App row
   appRow: {
     flexDirection: "row", alignItems: "center",
-    backgroundColor: C.card, marginHorizontal: 16, marginBottom: 8,
-    borderRadius: 16, padding: 12,
-    borderWidth: 1, borderColor: C.cardBorder,
-    gap: 10,
+    backgroundColor: "#FFFFFF", marginHorizontal: 20, marginBottom: 12,
+    borderRadius: 20, padding: 14,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04, shadowRadius: 10, elevation: 2,
+    borderWidth: 1, borderColor: "#F1F5F9",
+    gap: 12,
   },
-  rankText: { fontSize: 11, color: C.subtext, fontWeight: "600", width: 18, textAlign: "center" },
-  appIcon: {
-    width: 44, height: 44, borderRadius: 12,
-    justifyContent: "center", alignItems: "center",
-  },
-  appIconText: { fontSize: 15, fontWeight: "800" },
-  appInfo:  { flex: 1, gap: 2 },
-  appName:  { fontSize: 14, fontWeight: "700", color: C.text },
-  appPkg:   { fontSize: 10, color: C.subtext },
+  rankText: { fontSize: 12, color: C.subtext, fontWeight: "700", width: 20, textAlign: "center" },
+  appInfo: { flex: 1, gap: 4, marginLeft: 8 },
+  appName: { fontSize: 15, fontWeight: "700", color: C.text },
+  appPkg: { fontSize: 11, color: C.subtext },
   barTrack: {
-    height: 4, backgroundColor: C.pill, borderRadius: 2,
+    height: 6, backgroundColor: "#F1F5F9", borderRadius: 3,
     marginTop: 4, overflow: "hidden",
   },
-  barFill: { height: "100%", borderRadius: 2 },
-  timeText: {
-    fontSize: 13, fontWeight: "700",
-    minWidth: 52, textAlign: "right",
-  },
-
-  // Footer
-  footer:    { paddingHorizontal: 24, paddingTop: 20, alignItems: "center", gap: 4 },
-  savedText: { fontSize: 11, color: C.success, textAlign: "center" },
-  footerNote:{ fontSize: 10, color: C.subtext, textAlign: "center" },
-
-  // Permission wall
-  permEmoji: { fontSize: 56, marginBottom: 16 },
-  permTitle: { fontSize: 24, fontWeight: "800", color: C.text, textAlign: "center", marginBottom: 12 },
-  permDesc:  { fontSize: 14, color: C.subtext, textAlign: "center", lineHeight: 22, marginBottom: 32 },
+  barFill: { height: "100%", borderRadius: 3 },
+  timeText: { fontSize: 14, fontWeight: "700", width: 75, textAlign: "right" },
+  footer: { paddingHorizontal: 24, paddingTop: 32, paddingBottom: 40, alignItems: "center", gap: 6 },
+  savedText: { fontSize: 12, color: C.success, fontWeight: "600" },
+  footerNote: { fontSize: 11, color: C.subtext, fontWeight: "500" },
+  permEmoji: { fontSize: 64, marginBottom: 20 },
+  permTitle: { fontSize: 22, fontWeight: "800", color: C.text, marginBottom: 12 },
+  permDesc: { fontSize: 15, color: C.subtext, textAlign: "center", lineHeight: 24, marginBottom: 40, paddingHorizontal: 10 },
   grantBtn: {
-    backgroundColor: C.accent, borderRadius: 16,
-    paddingVertical: 16, alignItems: "center", width: "100%",
+    backgroundColor: C.accent, borderRadius: 18,
+    paddingVertical: 18, alignItems: "center", width: "100%",
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3, shadowRadius: 12, elevation: 8,
   },
-  grantBtnText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-  recheckBtn:   { marginTop: 16, padding: 12 },
-  recheckText:  { fontSize: 14, color: C.accent },
-
-  // Insight Grid
-  insightGrid: { flexDirection: "row", gap: 12, marginTop: 4 },
+  grantBtnText: { fontSize: 17, fontWeight: "700", color: "#FFFFFF" },
+  recheckBtn: { marginTop: 24, padding: 12 },
+  recheckText: { fontSize: 15, color: C.accent, fontWeight: "600" },
+  insightGrid: { flexDirection: "row", gap: 14, marginTop: 4 },
   insightCard: {
-    flex: 1, backgroundColor: C.card, borderRadius: 16, padding: 12,
-    borderWidth: 1, borderColor: C.cardBorder, flexDirection: "row",
-    alignItems: "center", gap: 12,
+    flex: 1, backgroundColor: "#FFFFFF", borderRadius: 20, padding: 16,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04, shadowRadius: 10, elevation: 2,
+    borderWidth: 1, borderColor: "#F1F5F9",
+    alignItems: "flex-start", gap: 8,
   },
-  insightIcon:     { fontSize: 24 },
-  insightLabel:    { fontSize: 10, fontWeight: "700", color: C.subtext, textTransform: "uppercase", letterSpacing: 0.5 },
-  insightValue:    { fontSize: 14, fontWeight: "800", color: C.text, marginTop: 1 },
-  insightSubValue: { fontSize: 11, color: C.subtext, marginTop: 1 },
-
-  // App row extras
+  insightIcon: { fontSize: 28, marginBottom: 4 },
+  insightLabel: { fontSize: 11, fontWeight: "700", color: C.subtext, textTransform: "uppercase", letterSpacing: 0.6 },
+  insightValue: { fontSize: 16, fontWeight: "800", color: C.text, marginTop: 2 },
+  insightSubValue: { fontSize: 12, color: C.subtext, marginTop: 2, fontWeight: "500" },
   openBadge: {
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
   },
-  openBadgeText: { fontSize: 10, fontWeight: "800" },
+  openBadgeText: { fontSize: 11, fontWeight: "800" },
+  sortBar: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    padding: 3,
+    borderRadius: 10,
+  },
+  sortBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  sortBtnActive: {
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sortBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: C.subtext,
+  },
+  sortBtnTextActive: {
+    color: C.accent,
+  },
 });

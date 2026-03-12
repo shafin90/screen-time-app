@@ -1,5 +1,5 @@
 import Realm from "realm";
-import { Usage, DailySnapshot } from "./schemas";
+import { DailySnapshot, Usage } from "./schemas";
 
 let _realm: Realm | null = null;
 
@@ -12,7 +12,7 @@ export const getRealm = async (): Promise<Realm> => {
 
   _realm = await Realm.open({
     schema: [Usage, DailySnapshot],
-    schemaVersion: 1,
+    schemaVersion: 2,
   });
 
   return _realm;

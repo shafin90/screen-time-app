@@ -1,6 +1,6 @@
-import Realm, { UpdateMode } from "realm";
+import { UpdateMode } from "realm";
 import { getRealm } from "../database/realmConfig";
-import { Usage, DailySnapshot } from "../database/schemas";
+import { DailySnapshot, Usage } from "../database/schemas";
 import { UsageStat } from "../native/usageStats";
 
 // ─── Save / upsert today's usage into Realm ───────────────────────────────────
@@ -20,12 +20,12 @@ export const saveUsageToRealm = async (stats: UsageStat[]): Promise<void> => {
       realm.create<Usage>(
         "Usage",
         {
-          id:          `${today}::${stat.packageName}`,
+          id: `${today}::${stat.packageName}`,
           packageName: stat.packageName,
-          appName:     stat.appName,
-          timeInMs:    stat.totalTimeInForeground,
-          openCount:   stat.openCount,
-          date:        today,
+          appName: stat.appName,
+          timeInMs: stat.totalTimeInForeground,
+          openCount: stat.openCount,
+          date: today,
         },
         UpdateMode.Modified
       );
@@ -44,10 +44,10 @@ export const saveUsageToRealm = async (stats: UsageStat[]): Promise<void> => {
 
 export interface StoredUsage {
   packageName: string;
-  appName:     string;
-  timeInMs:    number;
-  openCount:   number;
-  date:        string;
+  appName: string;
+  timeInMs: number;
+  openCount: number;
+  date: string;
 }
 
 export const getTodayUsage = async (): Promise<StoredUsage[]> => {
@@ -62,17 +62,17 @@ export const getTodayUsage = async (): Promise<StoredUsage[]> => {
   // Snapshot out of Realm's live list into a plain array
   return Array.from(results).map((u) => ({
     packageName: u.packageName,
-    appName:     u.appName,
-    timeInMs:    u.timeInMs,
-    openCount:   u.openCount,
-    date:        u.date,
+    appName: u.appName,
+    timeInMs: u.timeInMs,
+    openCount: u.openCount,
+    date: u.date,
   }));
 };
 
 // ─── Read last 7 days of daily totals ─────────────────────────────────────────
 
 export interface DailyTotal {
-  date:    string;    // YYYY-MM-DD
+  date: string;    // YYYY-MM-DD
   totalMs: number;
 }
 
@@ -101,9 +101,9 @@ export const getUsageForDate = async (date: string): Promise<StoredUsage[]> => {
 
   return Array.from(results).map((u) => ({
     packageName: u.packageName,
-    appName:     u.appName,
-    timeInMs:    u.timeInMs,
-    openCount:   u.openCount,
-    date:        u.date,
+    appName: u.appName,
+    timeInMs: u.timeInMs,
+    openCount: u.openCount,
+    date: u.date,
   }));
 };

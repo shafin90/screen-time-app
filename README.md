@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Welcome to your Expo app 👋
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
@@ -48,3 +49,12 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+=======
+# screen-time-app
+an Android Screen Time Tracker App using React Native (Expo Bare Workflow) that shows how long the user spends on each app per day.        
+The app should:  
+*collect daily app usage stats  
+*identify device without authentication  
+*store analytics in Firebase Firestore  
+*display daily usage list
+>>>>>>> 331ce3f9d79a8167efdb5485339508e12b8dff8f
